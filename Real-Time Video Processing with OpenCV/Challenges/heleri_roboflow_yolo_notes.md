@@ -59,3 +59,6 @@ The exported dataset is ready for training a YOLO object detection model.
 
 ## Notes
 This dataset is intended to support future AI-assisted robotic fabrication workflows, where detected reed stems inform toolpath generation and material processing decisions.
+
+The YOLO dataset was exported locally as a ZIP file and is available upon request.
+
