@@ -6,16 +6,20 @@ OscP5 oscP5;
 NetAddress pythonServer;
 
 String prompt = "Waiting for Python state...";
-int housing = 0, green = 0, mobility = 0;
+int roundNumber = 1;
+
+int housing = 0;
+int green = 0;
+int mobility = 0;
 
 void setup() {
   size(1000, 600);
   textAlign(CENTER, CENTER);
 
-  // listen for state from Python
+  // Listen for state from Python (Python -> Processing)
   oscP5 = new OscP5(this, 9000);
 
-  // send events to Python
+  // Send click events to Python (Processing -> Python)
   pythonServer = new NetAddress("127.0.0.1", 8000);
 }
 
@@ -25,9 +29,9 @@ void draw() {
   // Header
   fill(255);
   textSize(18);
-  text(prompt, width/2, 40);
+  text("Round " + roundNumber + ": " + prompt, width/2, 40);
 
-  // Zones area
+  // Zones layout
   int y0 = 90;
   int h = height - 150;
   int w = width / 3;
@@ -59,6 +63,8 @@ void mousePressed() {
     OscMessage msg = new OscMessage("/game/zone_click");
     msg.add(zone);
     oscP5.send(msg, pythonServer);
+
+    // Local feedback while waiting for Python response
     prompt = "Clicked: " + zone + " (sent to Python)";
   }
 }
@@ -79,8 +85,11 @@ void oscEvent(OscMessage msg) {
   if (msg.checkAddrPattern("/game/state") && msg.checkTypetag("s")) {
     String jsonStr = msg.get(0).stringValue();
     JSONObject obj = parseJSONObject(jsonStr);
+
     if (obj != null) {
       prompt = obj.getString("prompt");
+      roundNumber = obj.getInt("round");
+
       JSONObject scores = obj.getJSONObject("scores");
       housing = scores.getInt("HOUSING");
       green = scores.getInt("GREEN");
