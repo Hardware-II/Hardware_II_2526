@@ -23,16 +23,17 @@ GRID_H = 9
 
 # Heatmap decay (0.0..1.0). Closer to 1.0 = slower fade
 HEAT_DECAY = 0.96
-
-# How strongly each person contributes per tick
 HEAT_ADD_PER_PERSON = 1
 
-# People simulation (Fake YOLO) toggle
+# Fake YOLO (people simulation)
 SIM_ENABLED = True
 SIM_PEOPLE_MIN = 1
 SIM_PEOPLE_MAX = 3
 SIM_SPEED = 0.12  # normalized units per second
 SIM_TICK = 0.1    # seconds
+
+# DWELL-TO-VOTE
+DWELL_SECONDS = 5.0
 # ---------------------------------------
 
 client = SimpleUDPClient(PROCESSING_IP, PROCESSING_PORT)
@@ -51,11 +52,13 @@ state = {
     "prompt": PROMPTS[0],
     "time_left": ROUND_DURATION,
 
-    # votes (game choice)
+    # votes
     "scores": {"HOUSING": 0, "GREEN": 0, "MOBILITY": 0},
 
-    # density/occupancy outputs
+    # occupancy outputs
     "zone_counts": {"HOUSING": 0, "GREEN": 0, "MOBILITY": 0},
+
+    # heatmap
     "grid_w": GRID_W,
     "grid_h": GRID_H,
     "heatmap": [0] * (GRID_W * GRID_H),
@@ -63,10 +66,13 @@ state = {
     # people detections (normalized 0..1)
     "people": [],
 
-    # metrics (quantitative output)
+    # metrics
     "people_count": 0,
     "avg_speed": 0.0,
     "max_speed": 0.0,
+
+    # dwell config for UI
+    "dwell_seconds": DWELL_SECONDS,
 }
 
 round_start_time = time.time()
@@ -75,9 +81,23 @@ round_start_time = time.time()
 _people = []
 _last_sim_t = time.time()
 
+# Dwell tracking per person id
+# example:
+# _dwell[id] = {"zone": "GREEN", "enter_t": 123.4, "voted": False}
+_dwell = {}
+
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
+
+
+def zone_from_x(nx: float) -> str:
+    if nx < 1/3:
+        return "HOUSING"
+    elif nx < 2/3:
+        return "GREEN"
+    else:
+        return "MOBILITY"
 
 
 def send_state():
@@ -91,6 +111,11 @@ def reset_round_data():
     for k in state["zone_counts"]:
         state["zone_counts"][k] = 0
     state["heatmap"] = [0] * (GRID_W * GRID_H)
+
+    # reset dwell votes each round
+    for pid in list(_dwell.keys()):
+        _dwell[pid]["voted"] = False
+        _dwell[pid]["enter_t"] = time.time()
 
 
 def next_round():
@@ -118,7 +143,6 @@ def grid_index_from_norm(nx, ny):
 
 
 def apply_heat_decay():
-    # Multiply each cell by decay factor, rounding down a bit
     hm = state["heatmap"]
     for i in range(len(hm)):
         hm[i] = int(hm[i] * HEAT_DECAY)
@@ -126,7 +150,6 @@ def apply_heat_decay():
 
 
 def add_heat_from_people():
-    # Each person adds heat to their current cell
     hm = state["heatmap"]
     for p in state["people"]:
         idx = grid_index_from_norm(p["x"], p["y"])
@@ -135,16 +158,9 @@ def add_heat_from_people():
 
 
 def update_zone_counts_from_people():
-    # Zones are 3 vertical columns: [0..1/3), [1/3..2/3), [2/3..1]
     counts = {"HOUSING": 0, "GREEN": 0, "MOBILITY": 0}
     for p in state["people"]:
-        x = p["x"]
-        if x < 1/3:
-            counts["HOUSING"] += 1
-        elif x < 2/3:
-            counts["GREEN"] += 1
-        else:
-            counts["MOBILITY"] += 1
+        counts[zone_from_x(p["x"])] += 1
     state["zone_counts"] = counts
 
 
@@ -160,8 +176,45 @@ def compute_speed_metrics():
     state["max_speed"] = max(speeds)
 
 
+def update_dwell_and_votes(now: float):
+    """
+    For each person:
+    - determine current zone
+    - if zone changed: reset timer + allow voting again
+    - if stayed >= DWELL_SECONDS and not voted yet: register vote once
+    Also write dwell_progress into people dict for UI.
+    """
+    for p in state["people"]:
+        pid = int(p.get("id", 0))
+        z = zone_from_x(p["x"])
+
+        if pid not in _dwell:
+            _dwell[pid] = {"zone": z, "enter_t": now, "voted": False}
+
+        # zone change => reset dwell + allow new vote
+        if _dwell[pid]["zone"] != z:
+            _dwell[pid]["zone"] = z
+            _dwell[pid]["enter_t"] = now
+            _dwell[pid]["voted"] = False
+
+        dwell_time = now - _dwell[pid]["enter_t"]
+        progress = clamp(dwell_time / DWELL_SECONDS, 0.0, 1.0)
+
+        # attach to people for UI
+        p["zone"] = z
+        p["dwell"] = float(dwell_time)
+        p["dwell_progress"] = float(progress)
+        p["ready"] = bool(progress >= 1.0 and not _dwell[pid]["voted"])
+
+        # vote once per "stay"
+        if dwell_time >= DWELL_SECONDS and not _dwell[pid]["voted"]:
+            if z in state["scores"]:
+                state["scores"][z] += 1
+                state["prompt"] = f"Dwell vote registered: {z}"
+            _dwell[pid]["voted"] = True
+
+
 def round_timer_loop():
-    # Sends periodic state so UI stays live and timer counts down
     while True:
         time.sleep(0.2)
         elapsed = time.time() - round_start_time
@@ -188,13 +241,10 @@ def _spawn_people():
 
 
 def _step_people(dt):
-    # random walk with bounce at edges
     for p in _people:
-        # small random steering
         p["vx"] += (random.random()*2 - 1) * 0.03
         p["vy"] += (random.random()*2 - 1) * 0.03
 
-        # clamp speed
         sp = math.sqrt(p["vx"]*p["vx"] + p["vy"]*p["vy"])
         if sp > SIM_SPEED:
             p["vx"] = (p["vx"] / sp) * SIM_SPEED
@@ -233,12 +283,11 @@ def sim_loop():
 
         _step_people(dt)
 
-        # convert to "detections" for Processing
         people = []
         for p in _people:
             speed = math.sqrt(p["vx"]*p["vx"] + p["vy"]*p["vy"])
             people.append({
-                "id": p["id"],
+                "id": int(p["id"]),
                 "x": float(p["x"]),
                 "y": float(p["y"]),
                 "vx": float(p["vx"]),
@@ -254,8 +303,11 @@ def sim_loop():
         update_zone_counts_from_people()
         compute_speed_metrics()
 
-        # Keep prompt short if not voting right now
-        if "Vote registered" not in state["prompt"]:
+        # Dwell vote update (this modifies scores + attaches dwell_progress to people)
+        update_dwell_and_votes(now)
+
+        # Keep prompt "scenario" unless we just voted
+        if "Dwell vote registered" not in state["prompt"]:
             state["prompt"] = PROMPTS[(state["round"] - 1) % len(PROMPTS)]
 
         send_state()
@@ -265,12 +317,12 @@ def sim_loop():
 
 def on_zone_click(address, zone_name, px=None, py=None, w=None, h=None):
     """
-    Manual voting via click (still useful).
+    Optional manual vote click (keeps useful for debugging).
     """
     zone = str(zone_name)
     if zone in state["scores"]:
         state["scores"][zone] += 1
-        state["prompt"] = f"Vote registered: {zone}"
+        state["prompt"] = f"Manual vote registered: {zone}"
     else:
         state["prompt"] = f"Unknown zone: {zone}"
     send_state()
@@ -278,20 +330,22 @@ def on_zone_click(address, zone_name, px=None, py=None, w=None, h=None):
 
 def on_people_json(address, people_json):
     """
-    ROS2->OSC bridge can send detections to the server:
-      address: /game/people
-      payload: JSON string, example:
-        [{"id":1,"x":0.2,"y":0.7,"vx":0.0,"vy":0.0,"speed":0.0}, ...]
-    When this arrives, we override state["people"] and update heatmap/metrics.
+    ROS2->OSC can send detections to server:
+      /game/people  "<JSON string list of people>"
+    Format:
+      [{"id":1,"x":0.2,"y":0.7,"vx":0,"vy":0,"speed":0}, ...]
     """
     try:
         people = json.loads(str(people_json))
         if isinstance(people, list):
             state["people"] = people
+
             apply_heat_decay()
             add_heat_from_people()
             update_zone_counts_from_people()
             compute_speed_metrics()
+            update_dwell_and_votes(time.time())
+
             send_state()
     except Exception as e:
         state["prompt"] = f"Bad /game/people JSON: {e}"
@@ -303,13 +357,10 @@ dispatcher.map("/game/zone_click", on_zone_click)
 dispatcher.map("/game/people", on_people_json)
 
 if __name__ == "__main__":
-    print("Starting Group02 Floor Game Server (decay + fake YOLO + OSC)")
+    print("Starting Group02 Floor Game Server (DWELL=5s + fake YOLO + decay)")
     print(f"Listening OSC on {PYTHON_IP}:{PYTHON_PORT} | Sending state to {PROCESSING_IP}:{PROCESSING_PORT}")
 
-    # Timer thread (rounds)
     threading.Thread(target=round_timer_loop, daemon=True).start()
-
-    # Simulator thread (people)
     threading.Thread(target=sim_loop, daemon=True).start()
 
     send_state()

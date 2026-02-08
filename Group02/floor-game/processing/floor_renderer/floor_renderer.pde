@@ -13,25 +13,24 @@ int timeLeft = 30;
 int housingVotes = 0, greenVotes = 0, mobilityVotes = 0;
 int occHousing = 0, occGreen = 0, occMobility = 0;
 
-// heatmap data from Python
+// heatmap
 int gridW = 16;
 int gridH = 9;
 int[] heat = new int[16 * 9];
 
-// people data
+// people + metrics
 JSONArray peopleArr = new JSONArray();
 int peopleCount = 0;
 float avgSpeed = 0;
 float maxSpeed = 0;
+float dwellSeconds = 5.0;
 
 void setup() {
   size(1000, 600);
   textAlign(CENTER, CENTER);
+  smooth();
 
-  // Listen for OSC from Python
   oscP5 = new OscP5(this, 9000);
-
-  // Send OSC events to Python
   pythonServer = new NetAddress("127.0.0.1", 8000);
 }
 
@@ -46,7 +45,7 @@ void draw() {
   textSize(16);
   text(prompt, width/2, 60);
 
-  // Zones layout
+  // Zone area
   int y0 = 90;
   int zoneH = height - 220;
   int zoneW = width / 3;
@@ -55,22 +54,20 @@ void draw() {
   drawZone(1 * zoneW, y0, zoneW, zoneH, "GREEN");
   drawZone(2 * zoneW, y0, zoneW, zoneH, "MOBILITY");
 
-  // Heatmap overlay in the zone area
   drawHeatmap(0, y0, width, zoneH);
+  drawPeopleWithDwell(0, y0, width, zoneH);
 
-  // Draw people dots on top (fake YOLO / future real detections)
-  drawPeople(0, y0, width, zoneH);
-
-  // Footer: votes
+  // Footer votes
   fill(255);
   textSize(16);
   text("HOUSING votes: " + housingVotes, width/6, height - 95);
   text("GREEN votes: " + greenVotes, width/2, height - 95);
   text("MOBILITY votes: " + mobilityVotes, 5 * width/6, height - 95);
 
-  // Footer: quantitative outputs
+  // Quantitative outputs
   textSize(12);
-  text("people: " + peopleCount + " | avg speed: " + nf(avgSpeed, 1, 3) + " | max speed: " + nf(maxSpeed, 1, 3),
+  text("people: " + peopleCount + " | avg speed: " + nf(avgSpeed, 1, 3) + " | max speed: " + nf(maxSpeed, 1, 3) +
+       " | dwell: " + nf(dwellSeconds, 1, 1) + "s",
        width/2, height - 70);
 
   drawDensityBars();
@@ -114,7 +111,7 @@ void drawDensityBars() {
 
   fill(255);
   textSize(12);
-  text("density samples (people in zone): H " + occHousing + " | G " + occGreen + " | M " + occMobility,
+  text("occupancy (people in zone): H " + occHousing + " | G " + occGreen + " | M " + occMobility,
        width/2, barY - 18);
 }
 
@@ -134,20 +131,17 @@ void drawHeatmap(int x, int y, int w, int h) {
   for (int gy = 0; gy < gridH; gy++) {
     for (int gx = 0; gx < gridW; gx++) {
       int idx = gy * gridW + gx;
-      float v = heat[idx] / (float)maxHeat; // 0..1
+      float v = heat[idx] / (float)maxHeat;
 
-      // subtle overlay
+      // subtle overlay (white alpha)
       fill(255, 255 * v * 0.35);
       rect(x + gx * cellW, y + gy * cellH, cellW, cellH);
     }
   }
 }
 
-void drawPeople(int x, int y, int w, int h) {
+void drawPeopleWithDwell(int x, int y, int w, int h) {
   if (peopleArr == null) return;
-
-  noStroke();
-  fill(255);
 
   for (int i = 0; i < peopleArr.size(); i++) {
     JSONObject p = peopleArr.getJSONObject(i);
@@ -157,6 +151,9 @@ void drawPeople(int x, int y, int w, int h) {
     float ny = p.getFloat("y");
     float sp = p.hasKey("speed") ? p.getFloat("speed") : 0;
 
+    float prog = p.hasKey("dwell_progress") ? p.getFloat("dwell_progress") : 0;
+    boolean ready = p.hasKey("ready") ? p.getBoolean("ready") : false;
+
     float px = x + nx * w;
     float py = y + ny * h;
 
@@ -164,19 +161,40 @@ void drawPeople(int x, int y, int w, int h) {
     float r = 10 + sp * 60;
     r = constrain(r, 10, 30);
 
+    // person dot
+    noStroke();
+    fill(255);
     ellipse(px, py, r, r);
+
+    // dwell progress ring
+    float ringR = r + 10;
+    stroke(255);
+    noFill();
+    ellipse(px, py, ringR, ringR);
+
+    // progress arc (0..TWO_PI)
+    float a = prog * TWO_PI;
+
+    // if ready -> thicker/brighter ring
+    if (ready) {
+      strokeWeight(4);
+    } else {
+      strokeWeight(2);
+    }
+    stroke(255);
+    arc(px, py, ringR, ringR, -HALF_PI, -HALF_PI + a);
+    strokeWeight(1);
   }
 }
 
+// Optional manual vote click (debug)
 void mousePressed() {
-  // manual voting still works
   String zone = zoneUnderMouse();
   if (zone != null) {
     OscMessage msg = new OscMessage("/game/zone_click");
     msg.add(zone);
-    // (optional coords, but Python accepts missing values)
     oscP5.send(msg, pythonServer);
-    prompt = "Clicked: " + zone + " (sent to Python)";
+    prompt = "Manual click vote: " + zone;
   }
 }
 
@@ -201,6 +219,8 @@ void oscEvent(OscMessage msg) {
       roundNumber = obj.getInt("round");
       timeLeft = obj.getInt("time_left");
 
+      if (obj.hasKey("dwell_seconds")) dwellSeconds = obj.getFloat("dwell_seconds");
+
       JSONObject scores = obj.getJSONObject("scores");
       housingVotes = scores.getInt("HOUSING");
       greenVotes = scores.getInt("GREEN");
@@ -222,7 +242,6 @@ void oscEvent(OscMessage msg) {
         }
       }
 
-      // people + metrics
       peopleArr = obj.getJSONArray("people");
       peopleCount = obj.getInt("people_count");
       avgSpeed = obj.getFloat("avg_speed");
