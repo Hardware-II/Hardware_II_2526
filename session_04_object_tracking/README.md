@@ -51,3 +51,9 @@ through ROS2 or visual output.
 ## 🎯 Session Goal
 Students will learn how to combine **detection, tracking, and geometric mapping** 
 to extract real-world metrics and integrate them into ROS2 workflows.
+
+
+Instructor:
+-----------
+Hamid Peiro
+Computational Design · Robotics · Digital Fabrication
