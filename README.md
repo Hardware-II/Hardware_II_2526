@@ -91,3 +91,8 @@ This repository contains all course materials, session notes, and project guidel
 - Integration with ROS2 or Arduino
 
 ---
+
+Instructor:
+-----------
+Hamid Peiro
+Computational Design · Robotics · Digital Fabrication
