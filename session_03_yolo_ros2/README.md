@@ -61,3 +61,7 @@ Run YOLO in one of the following ways:
 ## 🎯 Session Goal
 Understand how a vision model is trained, tested, debugged, and integrated
 into a ROS2-based robotics workflow.
+Instructor:
+-----------
+Hamid Peiro
+Computational Design · Robotics · Digital Fabrication
