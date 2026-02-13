@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+
+# YOLO output
+runs/
+
+# Videos
+videos/
+*.mp4
+*.avi
+*.mov
+
+# Models
+*.pt
