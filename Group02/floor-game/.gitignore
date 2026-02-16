@@ -13,3 +13,5 @@ videos/
 
 # Models
 *.pt
+
+venv/
