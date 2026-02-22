@@ -1,0 +1,57 @@
+{
+  "_comment": "Urban Park Design Table — runtime configuration. Edit before launching.",
+
+  "camera_index": 1,
+  "camera_width": 640,
+  "camera_height": 480,
+  "camera_fps": 30,
+  "camera_flip_h": true,
+  "camera_rotate_cw": 0,
+
+  "screen_width": 1920,
+  "screen_height": 1080,
+  "fullscreen": true,
+
+  "sidebar_side": "right",
+  "sidebar_width_fraction": 0.25,
+
+  "header_height": 60,
+  "statusbar_height": 44,
+  "tab_row_height": 0,
+
+  "pinch_threshold_norm": 0.22,
+  "release_threshold_norm": 0.38,
+  "pinch_hold_frames": 3,
+
+  "drag_lock_threshold_px": 28,
+  "scale_lock_threshold_px": 16,
+  "rotate_lock_threshold_deg": 10.0,
+
+  "scale_sensitivity": 0.005,
+  "rotate_sensitivity": 1.0,
+  "wrist_snap_degrees": 45,
+  "wrist_snap_enabled": true,
+  "wrist_snap_tolerance_deg": 6.0,
+
+  "dwell_time_ms": 600,
+  "sidebar_scroll_min_speed_px_s": 60,
+  "tracking_loss_grace_ms": 500,
+
+  "swipe_speed_threshold_px_s": 280,
+  "swipe_cooldown_s": 0.45,
+
+  "item_nominal_size_px": 80,
+  "item_min_scale": 0.2,
+  "item_max_scale": 3.0,
+
+  "debug_overlay": false,
+  "mediapipe_model_complexity": 1,
+
+  "cursor_smooth_alpha": 0.85,
+  "voice_mic_index": 1,
+
+  "mapbox_token": "",
+  "mapbox_lat": 41.3851,
+  "mapbox_lon": 2.1734,
+  "mapbox_zoom": 18
+}
